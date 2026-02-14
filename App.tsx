@@ -1,7 +1,9 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StoryRequest, StoryResult, GenerationStatus } from './types';
-import { generateStoryContent } from './services/geminiService';
+import { generateStoryContent, testConnection } from './services/geminiService';
+
+// Removed redundant declare global for aistudio as it is pre-defined as AIStudio by the environment
 
 // --- Components ---
 
@@ -42,7 +44,7 @@ const SelectField: React.FC<{
       value={value}
       onChange={(e) => onChange(e.target.value)}
       className="bg-slate-800/50 border border-slate-700 rounded-lg px-4 py-3 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all text-white appearance-none cursor-pointer"
-      style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='Stack 19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 1rem center', backgroundSize: '1.25rem' }}
+      style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 1rem center', backgroundSize: '1.25rem' }}
     >
       {options.map((opt) => (
         <option key={opt.value} value={opt.value} className="bg-[#0f172a]">
@@ -105,6 +107,53 @@ export default function App() {
   const [status, setStatus] = useState<GenerationStatus>(GenerationStatus.IDLE);
   const [result, setResult] = useState<StoryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  
+  // Settings Modal State
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isKeySelected, setIsKeySelected] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isTesting, setIsTesting] = useState(false);
+
+  useEffect(() => {
+    checkKeyStatus();
+  }, []);
+
+  const checkKeyStatus = async () => {
+    try {
+      // @ts-ignore - aistudio is globally available as AIStudio type
+      const hasKey = await window.aistudio.hasSelectedApiKey();
+      setIsKeySelected(hasKey);
+    } catch (e) {
+      console.error("API Key check failed", e);
+    }
+  };
+
+  const handleOpenKeySelector = async () => {
+    // @ts-ignore - aistudio is globally available as AIStudio type
+    await window.aistudio.openSelectKey();
+    setIsKeySelected(true); // Assume success per race condition instructions
+  };
+
+  const handleTestConnection = async () => {
+    setIsTesting(true);
+    setTestResult(null);
+    const result = await testConnection();
+    setTestResult(result);
+    setIsTesting(false);
+  };
+
+  const handleExportConfig = () => {
+    const data = JSON.stringify(request, null, 2);
+    // Simple Base64 encoding for "encryption" simulation as requested
+    const encrypted = btoa(unescape(encodeURIComponent(data)));
+    const blob = new Blob([encrypted], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'story_config_backup.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const handleGenerate = async () => {
     if (!request.topic) {
@@ -120,14 +169,19 @@ export default function App() {
         setResult(data);
         setStatus(GenerationStatus.SUCCESS);
       } catch (err: any) {
-        setError(err.message || "생성 중 오류가 발생했습니다.");
+        if (err.message && err.message.includes("Requested entity was not found")) {
+          setIsKeySelected(false);
+          setError("API 키가 유효하지 않습니다. 설정에서 키를 다시 선택해주세요.");
+        } else {
+          setError(err.message || "생성 중 오류가 발생했습니다.");
+        }
         setStatus(GenerationStatus.ERROR);
       }
     }, 100);
   };
 
   return (
-    <div className="min-h-screen bg-[#0f172a] text-slate-200 selection:bg-indigo-500/30">
+    <div className="min-h-screen bg-[#0f172a] text-slate-200 selection:bg-indigo-500/30 relative">
       {/* Header */}
       <header className="border-b border-slate-800 sticky top-0 z-50 bg-[#0f172a]/80 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
@@ -137,8 +191,17 @@ export default function App() {
             </div>
             <h1 className="text-xl font-bold tracking-tight text-white">AI Story Director <span className="text-indigo-400">Pro</span></h1>
           </div>
-          <div className="hidden md:block text-xs text-slate-500 font-medium bg-slate-800/50 px-3 py-1 rounded-full border border-slate-700">
-            Powered by Gemini 3 Pro
+          <div className="flex items-center gap-4">
+            <div className="hidden md:block text-xs text-slate-500 font-medium bg-slate-800/50 px-3 py-1 rounded-full border border-slate-700">
+              Powered by Gemini 3 Pro
+            </div>
+            <button 
+              onClick={() => setIsSettingsOpen(true)}
+              className="w-10 h-10 rounded-full hover:bg-slate-800 flex items-center justify-center transition-colors text-slate-400 hover:text-white"
+              title="Settings"
+            >
+              <i className="fas fa-cog text-xl"></i>
+            </button>
           </div>
         </div>
       </header>
@@ -350,15 +413,97 @@ export default function App() {
 
       </main>
 
+      {/* Settings Modal */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="glass-morphism rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in scale-in-95 duration-300">
+            <div className="p-6 border-b border-slate-800 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <i className="fas fa-cog text-indigo-400"></i> 시스템 설정 & API 관리
+              </h3>
+              <button onClick={() => setIsSettingsOpen(false)} className="text-slate-500 hover:text-white">
+                <i className="fas fa-times"></i>
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              {/* API Status */}
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-3">API Key Status</label>
+                <div className="flex items-center justify-between bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-3 h-3 rounded-full ${isKeySelected ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]'}`}></div>
+                    <span className="text-sm font-medium">{isKeySelected ? '연결 가능 (Key Selected)' : '키 선택 필요'}</span>
+                  </div>
+                  <button 
+                    onClick={handleOpenKeySelector}
+                    className="text-xs font-bold text-indigo-400 hover:text-indigo-300 transition-colors bg-indigo-500/10 px-3 py-1.5 rounded-lg border border-indigo-500/20"
+                  >
+                    키 변경하기
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-2 px-1 leading-tight">
+                  <i className="fas fa-info-circle mr-1"></i> API 키는 브라우저의 보안 컨텍스트에 의해 관리되며 본 앱에 직접 저장되지 않습니다. 
+                  <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" className="text-indigo-400 ml-1 underline">유료 계정</a> 필수.
+                </p>
+              </div>
+
+              {/* Connection Test */}
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-3">Connectivity Test</label>
+                <button 
+                  onClick={handleTestConnection}
+                  disabled={isTesting}
+                  className="w-full bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white text-sm font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+                >
+                  {isTesting ? <i className="fas fa-circle-notch fa-spin"></i> : <i className="fas fa-bolt text-yellow-400"></i>}
+                  연결 테스트 실행
+                </button>
+                {testResult && (
+                  <div className={`mt-3 p-3 rounded-lg text-xs flex items-start gap-2 ${testResult.success ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                    <i className={`fas ${testResult.success ? 'fa-check-circle' : 'fa-times-circle'} mt-0.5`}></i>
+                    <span>{testResult.message}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Local Backup */}
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-3">Local Backup (Encryption)</label>
+                <button 
+                  onClick={handleExportConfig}
+                  className="w-full bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 text-sm font-bold py-3 rounded-xl transition-all border border-indigo-500/20 flex items-center justify-center gap-2"
+                >
+                  <i className="fas fa-download"></i>
+                  로컬 드라이브에 설정값 저장
+                </button>
+                <p className="text-[10px] text-slate-500 mt-2 px-1">
+                  입력된 주제, 스타일 등 설정 데이터를 Base64로 인코딩하여 파일로 저장합니다.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-6 bg-slate-900/50 border-t border-slate-800">
+              <button 
+                onClick={() => setIsSettingsOpen(false)}
+                className="w-full bg-white text-slate-900 font-bold py-3 rounded-xl hover:bg-slate-200 transition-colors"
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Floating Info */}
       <div className="fixed bottom-6 right-6 z-40 hidden md:block">
         <div className="bg-slate-800 border border-slate-700 p-3 rounded-2xl shadow-2xl flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-green-500/20 flex items-center justify-center text-green-400 text-xs">
-            <i className="fas fa-check"></i>
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs ${isKeySelected ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+            <i className={`fas ${isKeySelected ? 'fa-check' : 'fa-exclamation'}`}></i>
           </div>
           <div className="text-[11px] leading-tight">
             <span className="block font-bold text-white">System Status</span>
-            <span className="text-slate-400">Ready to direct stories</span>
+            <span className="text-slate-400">{isKeySelected ? 'Ready to direct stories' : 'Key Selection Required'}</span>
           </div>
         </div>
       </div>

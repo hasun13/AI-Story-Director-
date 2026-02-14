@@ -2,8 +2,10 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { StoryRequest, StoryResult } from "../types";
 
+// Always use a new instance with the latest API key from process.env.API_KEY
 export const generateStoryContent = async (request: StoryRequest): Promise<StoryResult> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  // Use the API key directly from environment as required
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const systemInstruction = `
     당신은 AI 스토리텔링 및 영상 콘텐츠 설계 전문가입니다. 
@@ -74,5 +76,24 @@ export const generateStoryContent = async (request: StoryRequest): Promise<Story
   } catch (e) {
     console.error("JSON Parsing Error:", e);
     throw new Error("Failed to parse AI response.");
+  }
+};
+
+export const testConnection = async (): Promise<{ success: boolean; message: string }> => {
+  try {
+    // Create new instance for up-to-date key
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const startTime = Date.now();
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: "ping",
+    });
+    const endTime = Date.now();
+    if (response.text) {
+      return { success: true, message: `연결 성공! (응답 시간: ${endTime - startTime}ms)` };
+    }
+    return { success: false, message: "응답이 비어있습니다." };
+  } catch (e: any) {
+    return { success: false, message: e.message || "연결에 실패했습니다." };
   }
 };
